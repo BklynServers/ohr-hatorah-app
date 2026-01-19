@@ -7,7 +7,7 @@ from PIL import Image
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Ohr HaTorah Research", page_icon="🕎", layout="wide")
 
-# --- CUSTOM CSS (FOR THE LEXIS/OTZAR LOOK) ---
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
     .source-box {
@@ -28,9 +28,8 @@ st.markdown("""
 # --- SIDEBAR: SETTINGS ---
 with st.sidebar:
     st.title("🕎 Ohr HaTorah")
-    st.caption("Research Terminal v4.0")
+    st.caption("Research Terminal v4.1")
     
-    # 1. API KEY (BYOK Model for Cost Control)
     if 'GEMINI_API_KEY' in st.secrets:
         api_key = st.secrets['GEMINI_API_KEY']
     else:
@@ -38,19 +37,16 @@ with st.sidebar:
 
     st.divider()
     
-    # 2. RESEARCH TOOLS
     mode = st.radio("Select Tool:", ["Sugya Search (Lexis Mode)", "Scholar's Eye (OCR)", "Siddur Builder"])
     
     st.divider()
     
-    # 3. ZMANIM WIDGET (Minimalist)
     zip_code = st.text_input("Zip Code (Zmanim)", value="11213")
     if zip_code and st.button("Update"):
         st.rerun()
 
-# --- HELPER: SEFARIA SEARCH (THE LIBRARY) ---
+# --- HELPER: SEFARIA SEARCH ---
 def search_sefaria_text(ref):
-    # This fetches the ACTUAL text from Sefaria's database
     url = f"https://www.sefaria.org/api/texts/{ref}?context=0"
     try:
         response = requests.get(url).json()
@@ -60,30 +56,35 @@ def search_sefaria_text(ref):
     except:
         return None, None, None
 
-# --- AI CONFIGURATION ---
+# --- AI CONFIGURATION (FIXED) ---
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-pro", # Use PRO for deep analysis
-        system_instruction="""
-        You are the 'Ohr HaTorah' Research Engine.
-        1. **Role:** Analyze Torah texts like a legal scholar (LexisNexis style).
-        2. **Method:** When a user provides a text, analyze the Pshat, Remez, Drash, and Sod (if applicable).
-        3. **Tone:** Professional, Academic, and Reverent.
-        4. **Format:** Use structured tables and bullet points.
-        """
-    )
+    
+    # We use a TRY/EXCEPT block to find a working model
+    # We prefer 2.0 Flash (Smart/Fast), fallback to 1.5 Flash (Reliable)
+    SYSTEM_PROMPT = """
+    You are the 'Ohr HaTorah' Research Engine.
+    1. Role: Analyze Torah texts like a legal scholar.
+    2. Tone: Professional, Academic, and Reverent.
+    3. Format: Use structured tables and bullet points.
+    """
+    
+    try:
+        # Try the experimental 2.0 model first
+        model = genai.GenerativeModel(model_name="gemini-2.0-flash-exp", system_instruction=SYSTEM_PROMPT)
+    except:
+        # Fallback to standard 1.5 Flash
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash", system_instruction=SYSTEM_PROMPT)
 
 # --- MAIN INTERFACE ---
 
-# === MODE 1: SUGYA SEARCH (THE LEXIS EXPERIENCE) ===
+# === MODE 1: SUGYA SEARCH ===
 if mode == "Sugya Search (Lexis Mode)":
     st.header("🔎 Sugya Research Terminal")
     
-    # 1. SEARCH BAR
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_ref = st.text_input("Enter Source (e.g., 'Berakhot 2a', 'Rambam Deot 1:1', 'Genesis 1:1')")
+        search_ref = st.text_input("Enter Source (e.g., 'Berakhot 2a', 'Rambam Deot 1:1')")
     with col2:
         fetch_btn = st.button("Retrieve Text")
 
@@ -92,7 +93,6 @@ if mode == "Sugya Search (Lexis Mode)":
         st.session_state.current_en = ""
         st.session_state.current_ref = ""
 
-    # 2. RETRIEVE TEXT
     if fetch_btn and search_ref:
         he, en, ref_title = search_sefaria_text(search_ref)
         if he:
@@ -102,70 +102,49 @@ if mode == "Sugya Search (Lexis Mode)":
         else:
             st.error("Source not found in the Digital Library.")
 
-    # 3. SPLIT SCREEN WORKSPACE
     if st.session_state.current_ref:
         st.divider()
         st.subheader(f"📜 Text: {st.session_state.current_ref}")
         
         left_col, right_col = st.columns(2)
         
-        # LEFT: THE "OTZAR" (Raw Text)
         with left_col:
             st.info("📖 Source Text (Mekorot)")
-            
-            # Formatting complex text lists
             display_he = st.session_state.current_he
             display_en = st.session_state.current_en
             
-            # Handle if text is list or string
-            if isinstance(display_he, list):
-                display_he = " ".join([str(x) for x in display_he])
-            if isinstance(display_en, list):
-                display_en = " ".join([str(x) for x in display_en])
+            if isinstance(display_he, list): display_he = " ".join([str(x) for x in display_he])
+            if isinstance(display_en, list): display_en = " ".join([str(x) for x in display_en])
                 
             st.markdown(f"<div class='source-box'><div class='hebrew'>{display_he}</div><hr><div class='english'>{display_en}</div></div>", unsafe_allow_html=True)
 
-        # RIGHT: THE "LEXIS" (AI Analysis)
         with right_col:
             st.success("🤖 AI Legal Analyst")
-            
-            # Preset Prompts
-            analysis_type = st.selectbox("Select Analysis Type:", [
-                "Summarize & Key Points",
-                "Halachic Conclusion (Maskana)",
-                "Comparison (Rashi vs. Tosafot Logic)",
-                "Modern Application",
-                "Free Chat"
-            ])
+            analysis_type = st.selectbox("Select Analysis Type:", ["Summarize", "Halachic Conclusion", "Comparison", "Free Chat"])
             
             if st.button("Analyze Text"):
                 with st.spinner("Analyzing..."):
-                    prompt = f"""
-                    Analyze this text: {st.session_state.current_ref}
-                    Text Content: {display_he} \n {display_en}
-                    
-                    Task: Perform a '{analysis_type}'.
-                    If Halacha, cite the Shulchan Aruch rulings related to this.
-                    If Gemara, explain the Shakla v'Tarya (flow of logic).
-                    """
-                    response = model.generate_content(prompt)
-                    st.markdown(response.text)
+                    try:
+                        prompt = f"Analyze this text ({st.session_state.current_ref}):\n{display_he}\nTask: {analysis_type}"
+                        response = model.generate_content(prompt)
+                        st.markdown(response.text)
+                    except Exception as e:
+                        st.error(f"AI Error: {e}")
 
 # === MODE 2: SCHOLAR'S EYE (OCR) ===
 elif mode == "Scholar's Eye (OCR)":
-    st.header("👁️ Scholar's Eye (Image Scan)")
-    st.caption("Upload a page from a Sefer (like Otzar HaChochma) to analyze it.")
-    
+    st.header("👁️ Scholar's Eye")
     img_file = st.file_uploader("Upload Image", type=["png", "jpg", "jpeg"])
     if img_file:
         img = Image.open(img_file)
         st.image(img, width=400)
-        
-        if st.button("Transcribe & Explain"):
+        if st.button("Transcribe"):
             with st.spinner("Scanning..."):
-                prompt = "Transcribe this Hebrew/Aramaic text exactly. Then provide a translation and a summary of the topic discussing."
-                response = model.generate_content([prompt, img])
-                st.markdown(response.text)
+                try:
+                    response = model.generate_content(["Transcribe and explain:", img])
+                    st.markdown(response.text)
+                except Exception as e:
+                    st.error(f"AI Error: {e}")
 
 # === MODE 3: SIDDUR BUILDER ===
 elif mode == "Siddur Builder":
@@ -173,4 +152,11 @@ elif mode == "Siddur Builder":
     nusach = st.selectbox("Nusach", ["Sephardi", "Ashkenaz", "Ari"])
     prayer = st.selectbox("Prayer", ["Ashrei", "Amidah", "Aleinu"])
     if st.button("Generate"):
-        st.markdown(model.generate_content(f"Write '{prayer}' in Nusach '{nusach}'.").text)
+        with st.spinner("Writing..."):
+            try:
+                # SAFE GENERATION BLOCK
+                response = model.generate_content(f"Write '{prayer}' in Nusach '{nusach}'.")
+                st.markdown(response.text)
+            except Exception as e:
+                # If 2.0 fails, catch it here
+                st.error(f"Error generating prayer. Try refreshing or checking API key. Details: {e}")
